@@ -1,0 +1,25 @@
+#!/bin/bash -e
+
+FLUME_NG="$FLUME_INSTALL_DIR/bin/flume-ng"
+
+export SPOOL_SOURCE_DIR=/home/oncrawl/queued/${AGENT_ID}
+export HDFS_SINK_ROOT_PATH="hdfs://data01.c.oncrawl-loganal.internal:60000/user/oncrawl/log-analysis/flume-test1"
+
+# Perform environment variable expansion in all agent config file
+find /var/src/agent/conf -type f -exec \
+    perl -pe 's/\${([A-Z_]+)}/$ENV{$1}/g' -i \{\} \;
+
+export AGENT_NAME="${AGENT_NAME:-agent}"
+if [ $# = 0 ] ; then
+    set -- "$FLUME_NG" agent                                \
+    --conf "$AGENT_CONFIG_DIR"                              \
+    --name "$AGENT_NAME"                                    \
+    --conf-file "$AGENT_CONFIG_DIR/flume-conf.properties"   \
+    "$@"
+elif [ "${1:0:1}" = '-' ]; then
+    set -- "$FLUME_NG" agent "$@"
+fi
+
+echo $@
+
+exec $@

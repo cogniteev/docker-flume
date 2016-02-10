@@ -1,0 +1,13 @@
+#!/bin/sh -e
+
+cd /var/src/agent/extra-src
+if [ -f build.gradle ] ; then
+  touch .remove-me
+  gradle build
+  for jar in build/libs/*.jar ; do
+    cp "$jar" /var/src/agent/extra-jars
+  done
+  find . -type f -newer .remove-me -exec rm -rf \{\} \;
+  rm -f .remove-me
+  rm -rf ~/.m2
+fi
