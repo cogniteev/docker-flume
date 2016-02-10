@@ -1,0 +1,9 @@
+#!/bin/sh -e
+
+MIRROR="http://apache.osuosl.org"
+TARBALL="hadoop-${HADOOP_VERSION}-bin.tar.gz"
+
+mkdir -p "$HADOOP_INSTALL_DIR"
+cd "$HADOOP_INSTALL_DIR"
+curl "$MIRROR/hadoop/common/hadoop-${HADOOP_VERSION}/$TARBALL" | \
+    tar --strip-components 1 -zx

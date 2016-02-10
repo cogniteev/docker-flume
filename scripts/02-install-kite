@@ -1,0 +1,13 @@
+#!/bin/sh -e
+
+git clone https://github.com/kite-sdk/kite.git /var/src/kite
+cd /var/src/kite
+git checkout "release-${KITE_VERSION}"
+mvn package -DskipTests
+
+for target in kite-morphlines ; do
+    mkdir -p "$KITE_INSTALL_DIR"
+    mv "/var/src/kite/$target/${target}-all/target/lib" \
+       "$KITE_INSTALL_DIR/${target}"
+done
+rm -rf /var/src/kite ~/.m2

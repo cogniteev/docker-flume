@@ -1,0 +1,446 @@
+diff --git flume-ng-core/src/main/java/org/apache/flume/client/avro/ReliableSpoolingFileEventReader.java flume-ng-core/src/main/java/org/apache/flume/client/avro/ReliableSpoolingFileEventReader.java
+index 27e9c1e..9252994 100644
+--- flume-ng-core/src/main/java/org/apache/flume/client/avro/ReliableSpoolingFileEventReader.java
++++ flume-ng-core/src/main/java/org/apache/flume/client/avro/ReliableSpoolingFileEventReader.java
+@@ -94,8 +94,9 @@ public class ReliableSpoolingFileEventReader implements ReliableEventReader {
+   private final String deletePolicy;
+   private final Charset inputCharset;
+   private final DecodeErrorPolicy decodeErrorPolicy;
+-  private final ConsumeOrder consumeOrder;    
+-  
++  private final ConsumeOrder consumeOrder;
++  private final boolean recursiveDirectorySearch;
++
+   private Optional<FileInfo> currentFile = Optional.absent();
+   /** Always contains the last file from which lines have been read. **/
+   private Optional<FileInfo> lastFileRead = Optional.absent();
+@@ -115,7 +116,8 @@ public class ReliableSpoolingFileEventReader implements ReliableEventReader {
+       String deserializerType, Context deserializerContext,
+       String deletePolicy, String inputCharset,
+       DecodeErrorPolicy decodeErrorPolicy, 
+-      ConsumeOrder consumeOrder) throws IOException {
++      ConsumeOrder consumeOrder,
++      boolean recursiveDirectorySearch) throws IOException {
+ 
+     // Sanity checks
+     Preconditions.checkNotNull(spoolDirectory);
+@@ -175,7 +177,8 @@ public class ReliableSpoolingFileEventReader implements ReliableEventReader {
+     this.deletePolicy = deletePolicy;
+     this.inputCharset = Charset.forName(inputCharset);
+     this.decodeErrorPolicy = Preconditions.checkNotNull(decodeErrorPolicy);
+-    this.consumeOrder = Preconditions.checkNotNull(consumeOrder);    
++    this.consumeOrder = Preconditions.checkNotNull(consumeOrder);
++    this.recursiveDirectorySearch = recursiveDirectorySearch;
+ 
+     File trackerDirectory = new File(trackerDirPath);
+ 
+@@ -199,11 +202,61 @@ public class ReliableSpoolingFileEventReader implements ReliableEventReader {
+     }
+ 
+     this.metaFile = new File(trackerDirectory, metaFileName);
++
+     if(metaFile.exists() && metaFile.length() == 0) {
+       deleteMetaFile();
+     }
+   }
+ 
++  /**
++   * Filter to exclude files/directories either hidden, finished, or names matching the ignore pattern
++   */
++  final FileFilter filter = new FileFilter() {
++    public boolean accept(File candidate) {
++      if ( candidate.isDirectory() ) {
++        String directoryName = candidate.getName();
++        if ( (! recursiveDirectorySearch) ||
++                (directoryName.startsWith(".")) ||
++                ignorePattern.matcher(directoryName).matches()) {
++          return false;
++        }
++        return true;
++      }
++      else{
++        String fileName = candidate.getName();
++        if ((fileName.endsWith(completedSuffix)) ||
++                (fileName.startsWith(".")) ||
++                ignorePattern.matcher(fileName).matches()) {
++          return false;
++        }
++      }
++      return true;
++    }
++  };
++  
++  /**
++   * Recursively gather candidate files
++   * @param directory the directory to gather files from
++   * @return list of files within the passed in directory
++   */
++  private  List<File> getCandidateFiles(File directory){
++    List<File> candidateFiles = new ArrayList<File>();
++    if (directory==null || ! directory.isDirectory()){
++      return candidateFiles;
++    }
++    
++    for(File file : directory.listFiles(filter)){
++      if (file.isDirectory()) {
++        candidateFiles.addAll(getCandidateFiles(file));
++      }
++      else {
++        candidateFiles.add(file);
++      }
++    }
++
++    return candidateFiles;
++  }
++
+   @VisibleForTesting
+   int getListFilesCount() {
+     return listFilesCount;
+@@ -432,20 +485,7 @@ public class ReliableSpoolingFileEventReader implements ReliableEventReader {
+     if (consumeOrder != ConsumeOrder.RANDOM ||
+       candidateFileIter == null ||
+       !candidateFileIter.hasNext()) {
+-      /* Filter to exclude finished or hidden files */
+-      FileFilter filter = new FileFilter() {
+-        public boolean accept(File candidate) {
+-          String fileName = candidate.getName();
+-          if ((candidate.isDirectory()) ||
+-            (fileName.endsWith(completedSuffix)) ||
+-            (fileName.startsWith(".")) ||
+-            ignorePattern.matcher(fileName).matches()) {
+-            return false;
+-          }
+-          return true;
+-        }
+-      };
+-      candidateFiles = Arrays.asList(spoolDirectory.listFiles(filter));
++      candidateFiles = getCandidateFiles(spoolDirectory);
+       listFilesCount++;
+       candidateFileIter = candidateFiles.iterator();
+     }
+@@ -593,7 +633,9 @@ public class ReliableSpoolingFileEventReader implements ReliableEventReader {
+         SpoolDirectorySourceConfigurationConstants.DEFAULT_DECODE_ERROR_POLICY
+             .toUpperCase(Locale.ENGLISH));
+     private ConsumeOrder consumeOrder = 
+-        SpoolDirectorySourceConfigurationConstants.DEFAULT_CONSUME_ORDER;    
++        SpoolDirectorySourceConfigurationConstants.DEFAULT_CONSUME_ORDER;
++    private boolean recursiveDirectorySearch =
++        SpoolDirectorySourceConfigurationConstants.DEFAULT_RECURSIVE_DIRECTORY_SEARCH;
+     
+     public Builder spoolDirectory(File directory) {
+       this.spoolDirectory = directory;
+@@ -655,6 +697,11 @@ public class ReliableSpoolingFileEventReader implements ReliableEventReader {
+       return this;
+     }
+ 
++    public Builder recursiveDirectorySearch(boolean recursiveDirectorySearch) {
++      this.recursiveDirectorySearch = recursiveDirectorySearch;
++      return this;
++    }
++
+     public Builder decodeErrorPolicy(DecodeErrorPolicy decodeErrorPolicy) {
+       this.decodeErrorPolicy = decodeErrorPolicy;
+       return this;
+@@ -670,7 +717,7 @@ public class ReliableSpoolingFileEventReader implements ReliableEventReader {
+           ignorePattern, trackerDirPath, annotateFileName, fileNameHeader,
+           annotateBaseName, baseNameHeader, deserializerType,
+           deserializerContext, deletePolicy, inputCharset, decodeErrorPolicy,
+-          consumeOrder);
++          consumeOrder, recursiveDirectorySearch);
+     }
+   }
+ 
+diff --git flume-ng-core/src/main/java/org/apache/flume/source/SpoolDirectorySource.java flume-ng-core/src/main/java/org/apache/flume/source/SpoolDirectorySource.java
+index 0b11fc9..a7701c5 100644
+--- flume-ng-core/src/main/java/org/apache/flume/source/SpoolDirectorySource.java
++++ flume-ng-core/src/main/java/org/apache/flume/source/SpoolDirectorySource.java
+@@ -72,6 +72,7 @@ Configurable, EventDrivenSource {
+   private boolean hitChannelException = false;
+   private int maxBackoff;
+   private ConsumeOrder consumeOrder;
++  private boolean recursiveDirectorySearch;
+ 
+   @Override
+   public synchronized void start() {
+@@ -97,6 +98,7 @@ Configurable, EventDrivenSource {
+           .inputCharset(inputCharset)
+           .decodeErrorPolicy(decodeErrorPolicy)
+           .consumeOrder(consumeOrder)
++          .recursiveDirectorySearch(recursiveDirectorySearch)
+           .build();
+     } catch (IOException ioe) {
+       throw new FlumeException("Error instantiating spooling event parser",
+@@ -168,6 +170,9 @@ Configurable, EventDrivenSource {
+     consumeOrder = ConsumeOrder.valueOf(context.getString(CONSUME_ORDER, 
+         DEFAULT_CONSUME_ORDER.toString()).toUpperCase(Locale.ENGLISH));
+ 
++    recursiveDirectorySearch = context.getBoolean(RECURSIVE_DIRECTORY_SEARCH,
++        DEFAULT_RECURSIVE_DIRECTORY_SEARCH);
++
+     // "Hack" to support backwards compatibility with previous generation of
+     // spooling directory source, which did not support deserializers
+     Integer bufferMaxLineLength = context.getInteger(BUFFER_MAX_LINE_LENGTH);
+diff --git flume-ng-core/src/main/java/org/apache/flume/source/SpoolDirectorySourceConfigurationConstants.java flume-ng-core/src/main/java/org/apache/flume/source/SpoolDirectorySourceConfigurationConstants.java
+index 895433e..7f8f85c 100644
+--- flume-ng-core/src/main/java/org/apache/flume/source/SpoolDirectorySourceConfigurationConstants.java
++++ flume-ng-core/src/main/java/org/apache/flume/source/SpoolDirectorySourceConfigurationConstants.java
+@@ -92,5 +92,11 @@ public class SpoolDirectorySourceConfigurationConstants {
+     OLDEST, YOUNGEST, RANDOM
+   }
+   public static final String CONSUME_ORDER = "consumeOrder";
+-  public static final ConsumeOrder DEFAULT_CONSUME_ORDER = ConsumeOrder.OLDEST;    
++  public static final ConsumeOrder DEFAULT_CONSUME_ORDER = ConsumeOrder.OLDEST;
++
++  /** Flag to indicate if we should recursively checking for new files.  The default is false, so a
++   * configuration file entry would be needed to enable this setting */
++  public static final String RECURSIVE_DIRECTORY_SEARCH = "recursiveDirectorySearch";
++  public static final boolean DEFAULT_RECURSIVE_DIRECTORY_SEARCH = false;
++
+ }
+diff --git flume-ng-core/src/test/java/org/apache/flume/source/TestSpoolDirectorySource.java flume-ng-core/src/test/java/org/apache/flume/source/TestSpoolDirectorySource.java
+index 89e7c8c..a31c4d2 100644
+--- flume-ng-core/src/test/java/org/apache/flume/source/TestSpoolDirectorySource.java
++++ flume-ng-core/src/test/java/org/apache/flume/source/TestSpoolDirectorySource.java
+@@ -41,6 +41,7 @@ import org.junit.After;
+ import org.junit.Assert;
+ import org.junit.Before;
+ import org.junit.Test;
++import org.omg.CosNaming.IstringHelper;
+ 
+ import com.google.common.base.Charsets;
+ import com.google.common.io.Files;
+@@ -69,12 +70,46 @@ public class TestSpoolDirectorySource {
+ 
+   @After
+   public void tearDown() {
+-    for (File f : tmpDir.listFiles()) {
+-      f.delete();
+-    }
++    deleteFiles(tmpDir);
+     tmpDir.delete();
+   }
+ 
++  /**
++   * Helper method to recursively clean up testing directory
++   * @param directory the directory to clean up
++   */
++  private void deleteFiles(File directory){
++    for (File f : directory.listFiles()) {
++      if (f.isDirectory()){
++        deleteFiles(f);
++        f.delete();
++      }
++      else {
++        f.delete();
++      }
++    }
++  }
++
++  /**
++   * Uses reflection to retrieve the {@link SpoolDirectorySource}
++   * recursiveDirectorySearch property value.
++   * @return boolean - the source's property value
++   */
++  private boolean getSourceRecursionSetting(){
++    boolean val = false;
++    Class<?> c = source.getClass();
++    java.lang.reflect.Field f;
++    try {
++      final String RECURSIVE_FIELD_NAME = "recursiveDirectorySearch";
++      f = c.getDeclaredField(RECURSIVE_FIELD_NAME);
++      f.setAccessible(true);
++      val = f.getBoolean(source);
++    } catch (Exception e) {
++      e.printStackTrace();
++    }
++    return val;
++  }
++
+   @Test (expected = IllegalArgumentException.class)
+   public void testInvalidSortOrder() {
+     Context context = new Context();
+@@ -169,6 +204,89 @@ public class TestSpoolDirectorySource {
+   }
+ 
+   @Test
++  public void testRecursion_SetToTrue() throws IOException, InterruptedException {
++
++    File subDir = new File(tmpDir.getAbsolutePath() +  "/directorya/directoryb/directoryc");
++    boolean directoriesCreated = subDir.mkdirs();
++    Assert.assertTrue("mkDirs returned false, cannot proceed", directoriesCreated);
++
++    final String FILE_NAME="recursion_file.txt";
++    File f1 = new File(subDir.getAbsolutePath() + FILE_NAME);
++    Files.write("file1line1\nfile1line2\nfile1line3\nfile1line4\n" +
++            "file1line5\nfile1line6\nfile1line7\nfile1line8\n",
++            f1, Charsets.UTF_8);
++
++    Context context = new Context();
++    context.put(SpoolDirectorySourceConfigurationConstants.RECURSIVE_DIRECTORY_SEARCH,
++            "true"); //enable recursion, so we should find the file we created above
++    context.put(SpoolDirectorySourceConfigurationConstants.SPOOL_DIRECTORY,
++            tmpDir.getAbsolutePath()); //spool set to root dir.
++    context.put(SpoolDirectorySourceConfigurationConstants.FILENAME_HEADER,
++            "true"); //put the file name in the "file" header.
++
++    Configurables.configure(source, context);
++    source.start();
++    Assert.assertTrue("Recursion setting in source is not set to true.", getSourceRecursionSetting());
++
++    Thread.sleep(500);
++    Transaction txn = channel.getTransaction();
++    txn.begin();
++    Event e = channel.take();
++    Assert.assertNotNull("Event must not be null", e);
++    Assert.assertNotNull("Event headers must not be null", e.getHeaders());
++    Assert.assertTrue("File header value did not end with expected filename", e.getHeaders().get("file").endsWith(FILE_NAME));
++    txn.commit();
++    txn.close();
++  }
++
++
++  @Test
++  public void testRecursion_SetToFalse() throws IOException, InterruptedException {
++    Context context = new Context();
++
++    File subDir = new File(tmpDir.getAbsolutePath() + "/directory");
++    System.out.println("Create dirs");
++    boolean directoriesCreated = subDir.mkdirs();
++    System.out.println("directories created:" + directoriesCreated);
++
++
++    File f1 = new File(subDir.getAbsolutePath() + "/file1.txt");
++
++    Files.write("file1line1\nfile1line2\nfile1line3\nfile1line4\n" +
++            "file1line5\nfile1line6\nfile1line7\nfile1line8\n",
++            f1, Charsets.UTF_8);
++
++
++    context.put(SpoolDirectorySourceConfigurationConstants.RECURSIVE_DIRECTORY_SEARCH,
++            "false");
++    context.put(SpoolDirectorySourceConfigurationConstants.SPOOL_DIRECTORY,
++            tmpDir.getAbsolutePath());
++    context.put(SpoolDirectorySourceConfigurationConstants.FILENAME_HEADER,
++            "true");
++    context.put(SpoolDirectorySourceConfigurationConstants.FILENAME_HEADER_KEY,
++            "fileHeaderKeyTest");
++
++    Configurables.configure(source, context);
++    source.start();
++    //check the source to ensure the setting has been set via the context object
++    Assert.assertFalse("Recursion setting in source is not set to false (this test does not want recursion enabled).", getSourceRecursionSetting());
++    Thread.sleep(500);
++
++    //note:  this test will place a file into a sub-directory of the spool directory
++    // since the recursion setting is false there should not be any transactions
++    // to take from the channel.  The 500 ms is arbitrary and simply follows
++    // what the other tests use to "assume" that since there is no data
++    // then this worked.
++    Transaction txn = channel.getTransaction();
++    txn.begin();
++    Event e = channel.take();
++    Assert.assertNull("Event must be null", e);
++    txn.commit();
++    txn.close();
++  }
++
++
++  @Test
+   public void testLifecycle() throws IOException, InterruptedException {
+     Context context = new Context();
+     File f1 = new File(tmpDir.getAbsolutePath() + "/file1");
+diff --git flume-ng-doc/sphinx/FlumeUserGuide.rst flume-ng-doc/sphinx/FlumeUserGuide.rst
+index 4122cfe..4ac44b9 100644
+--- flume-ng-doc/sphinx/FlumeUserGuide.rst
++++ flume-ng-doc/sphinx/FlumeUserGuide.rst
+@@ -940,48 +940,49 @@ Despite the reliability guarantees of this source, there are still
+ cases in which events may be duplicated if certain downstream failures occur.
+ This is consistent with the guarantees offered by other Flume components.
+ 
+-====================  ==============  ==========================================================
+-Property Name         Default         Description
+-====================  ==============  ==========================================================
+-**channels**          --
+-**type**              --              The component type name, needs to be ``spooldir``.
+-**spoolDir**          --              The directory from which to read files from.
+-fileSuffix            .COMPLETED      Suffix to append to completely ingested files
+-deletePolicy          never           When to delete completed files: ``never`` or ``immediate``
+-fileHeader            false           Whether to add a header storing the absolute path filename.
+-fileHeaderKey         file            Header key to use when appending absolute path filename to event header.
+-basenameHeader        false           Whether to add a header storing the basename of the file.
+-basenameHeaderKey     basename        Header Key to use when appending  basename of file to event header.
+-ignorePattern         ^$              Regular expression specifying which files to ignore (skip)
+-trackerDir            .flumespool     Directory to store metadata related to processing of files.
+-                                      If this path is not an absolute path, then it is interpreted as relative to the spoolDir.
+-consumeOrder          oldest          In which order files in the spooling directory will be consumed ``oldest``,
+-                                      ``youngest`` and ``random``. In case of ``oldest`` and ``youngest``, the last modified
+-                                      time of the files will be used to compare the files. In case of a tie, the file
+-                                      with smallest laxicographical order will be consumed first. In case of ``random`` any
+-                                      file will be picked randomly. When using ``oldest`` and ``youngest`` the whole
+-                                      directory will be scanned to pick the oldest/youngest file, which might be slow if there
+-                                      are a large number of files, while using ``random`` may cause old files to be consumed
+-                                      very late if new files keep coming in the spooling directory.
+-maxBackoff            4000            The maximum time (in millis) to wait between consecutive attempts to write to the channel(s) if the channel is full. The source will start at a low backoff and increase it exponentially each time the channel throws a ChannelException, upto the value specified by this parameter.
+-batchSize             100             Granularity at which to batch transfer to the channel
+-inputCharset          UTF-8           Character set used by deserializers that treat the input file as text.
+-decodeErrorPolicy     ``FAIL``        What to do when we see a non-decodable character in the input file.
+-                                      ``FAIL``: Throw an exception and fail to parse the file.
+-                                      ``REPLACE``: Replace the unparseable character with the "replacement character" char,
+-                                      typically Unicode U+FFFD.
+-                                      ``IGNORE``: Drop the unparseable character sequence.
+-deserializer          ``LINE``        Specify the deserializer used to parse the file into events.
+-                                      Defaults to parsing each line as an event. The class specified must implement
+-                                      ``EventDeserializer.Builder``.
+-deserializer.*                        Varies per event deserializer.
+-bufferMaxLines        --              (Obselete) This option is now ignored.
+-bufferMaxLineLength   5000            (Deprecated) Maximum length of a line in the commit buffer. Use deserializer.maxLineLength instead.
+-selector.type         replicating     replicating or multiplexing
+-selector.*                            Depends on the selector.type value
+-interceptors          --              Space-separated list of interceptors
++====================     ==============  ==========================================================
++Property Name            Default         Description
++====================     ==============  ==========================================================
++**channels**             --
++**type**                 --              The component type name, needs to be ``spooldir``.
++**spoolDir**             --              The directory from which to read files from.
++fileSuffix               .COMPLETED      Suffix to append to completely ingested files
++deletePolicy             never           When to delete completed files: ``never`` or ``immediate``
++fileHeader               false           Whether to add a header storing the absolute path filename.
++fileHeaderKey            file            Header key to use when appending absolute path filename to event header.
++basenameHeader           false           Whether to add a header storing the basename of the file.
++basenameHeaderKey        basename        Header Key to use when appending  basename of file to event header.
++ignorePattern            ^$              Regular expression specifying which files to ignore (skip)
++trackerDir               .flumespool     Directory to store metadata related to processing of files.
++                                         If this path is not an absolute path, then it is interpreted as relative to the spoolDir.
++consumeOrder             oldest          In which order files in the spooling directory will be consumed ``oldest``,
++                                         ``youngest`` and ``random``. In case of ``oldest`` and ``youngest``, the last modified
++                                         time of the files will be used to compare the files. In case of a tie, the file
++                                         with smallest laxicographical order will be consumed first. In case of ``random`` any
++                                         file will be picked randomly. When using ``oldest`` and ``youngest`` the whole
++                                         directory will be scanned to pick the oldest/youngest file, which might be slow if there
++                                         are a large number of files, while using ``random`` may cause old files to be consumed
++                                         very late if new files keep coming in the spooling directory.
++recursiveDirectorySearch false			 Wheather to monitor sub directories for new files to read.
++maxBackoff               4000            The maximum time (in millis) to wait between consecutive attempts to write to the channel(s) if the channel is full. The source will start at a low backoff and increase it exponentially each time the channel throws a ChannelException, upto the value specified by this parameter.
++batchSize                100             Granularity at which to batch transfer to the channel
++inputCharset             UTF-8           Character set used by deserializers that treat the input file as text.
++decodeErrorPolicy        ``FAIL``        What to do when we see a non-decodable character in the input file.
++                                         ``FAIL``: Throw an exception and fail to parse the file.
++                                         ``REPLACE``: Replace the unparseable character with the "replacement character" char,
++                                         typically Unicode U+FFFD.
++                                         ``IGNORE``: Drop the unparseable character sequence.
++deserializer             ``LINE``        Specify the deserializer used to parse the file into events.
++                                         Defaults to parsing each line as an event. The class specified must implement
++                                         ``EventDeserializer.Builder``.
++deserializer.*                           Varies per event deserializer.
++bufferMaxLines           --              (Obselete) This option is now ignored.
++bufferMaxLineLength      5000            (Deprecated) Maximum length of a line in the commit buffer. Use deserializer.maxLineLength instead.
++selector.type            replicating     replicating or multiplexing
++selector.*                               Depends on the selector.type value
++interceptors             --              Space-separated list of interceptors
+ interceptors.*
+-====================  ==============  ==========================================================
++====================     ==============  ==========================================================
+ 
+ Example for an agent named agent-1:
+ 

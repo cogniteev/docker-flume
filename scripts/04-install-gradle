@@ -1,0 +1,10 @@
+#!/bin/sh -e
+
+ZIP_FILE="gradle-${GRADLE_VERSION}-bin.zip"
+
+cd /var
+curl -L "https://services.gradle.org/distributions/$ZIP_FILE" >"$ZIP_FILE"
+unzip "$ZIP_FILE"
+mv "gradle-${GRADLE_VERSION}" gradle
+rm -f "$ZIP_FILE"
+

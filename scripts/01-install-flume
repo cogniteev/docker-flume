@@ -1,0 +1,21 @@
+#!/bin/sh -e
+
+mkdir -p /var/src/flume
+cd /var/src/flume
+FLUME_MIRROR="http://apache.websitebeheerjd.nl"
+FLUME_TARBALL="apache-flume-${FLUME_VERSION}-src.tar.gz"
+curl -L "$FLUME_MIRROR/flume/${FLUME_VERSION}/$FLUME_TARBALL" | \
+    tar --strip-components 1 -zx
+
+for p in `echo /var/src/flume-patches/*` ; do
+    patch -p0 < "$p"
+done
+
+mvn dependency:resolve
+MAVEN_OPTS="-Xmx2g -XX:MaxPermSize=256m" mvn package -DskipTests
+
+FLUME_NG_DIST="/var/src/flume/flume-ng-dist"
+FLUME_NG_BIN="$FLUME_NG_DIST/target/apache-flume-${FLUME_VERSION}-bin"
+mv "$FLUME_NG_BIN/apache-flume-${FLUME_VERSION}-bin" "$FLUME_INSTALL_DIR"
+
+rm -rf /var/src/flume ~/.m2
