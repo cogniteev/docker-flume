@@ -2,9 +2,6 @@
 
 FLUME_NG="$FLUME_INSTALL_DIR/bin/flume-ng"
 
-export SPOOL_SOURCE_DIR=/home/oncrawl/queued/${AGENT_ID}
-export HDFS_SINK_ROOT_PATH="hdfs://data01.c.oncrawl-loganal.internal:60000/user/oncrawl/log-analysis/flume-test1"
-
 # Perform environment variable expansion in all agent config file
 find /var/src/agent/conf -type f -exec \
     perl -pe 's/\${([A-Z_]+)}/$ENV{$1}/g' -i \{\} \;
