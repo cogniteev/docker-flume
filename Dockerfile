@@ -1,4 +1,4 @@
-FROM quay.io/cogniteev/flume:1.6.0
+FROM cogniteev/flume:1.6.0
 
 ADD conf/* /var/src/agent/conf/
 ADD scripts/* /var/src/scripts/
