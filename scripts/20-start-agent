@@ -17,6 +17,4 @@ elif [ "${1:0:1}" = '-' ]; then
     set -- "$FLUME_NG" agent "$@"
 fi
 
-echo $@
-
 exec $@
