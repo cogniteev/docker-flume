@@ -23,7 +23,7 @@
 export JAVA_OPTS="-Xms100m -Xmx2000m -Dcom.sun.management.jmxremote"
 
 # Add hadoop jar to classpath
-FLUME_CLASSPATH="$FLUME_CLASSPATH:$HADOOP_INSTALL_DIR/*.jar"
+FLUME_CLASSPATH="$FLUME_CLASSPATH:$HADOOP_INSTALL_DIR/hadoop-core-1.2.1.jar"
 
 # Add kite libraries in classpath
 for jar in \
