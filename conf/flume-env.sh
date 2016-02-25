@@ -22,8 +22,14 @@
 # Give Flume more memory and pre-allocate, enable remote monitoring via JMX
 export JAVA_OPTS="-Xms100m -Xmx2000m -Dcom.sun.management.jmxremote"
 
-# Add hadoop jar to classpath
-FLUME_CLASSPATH="$FLUME_CLASSPATH:$HADOOP_INSTALL_DIR/hadoop-core-1.2.1.jar"
+if [ "x$WITH_HADOOP1" != x ] ; then
+    # Add hadoop jar to classpath
+    FLUME_CLASSPATH="$FLUME_CLASSPATH:$HADOOP_INSTALL_DIR/hadoop-core-1.2.1.jar"
+elif [ "x$WITH_HADOOP2" != x ] ; then
+    for subdir in common hdfs; do
+        FLUME_CLASSPATH="$FLUME_CLASSPATH:$HADOOP2_INSTALL_DIR/share/hadoop/$subdir/hadoop-${subdir}-${HADOOP2_VERSION}.jar"
+    done
+fi
 
 # Add kite libraries in classpath
 for jar in \
