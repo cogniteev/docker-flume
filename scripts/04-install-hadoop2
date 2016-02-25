@@ -1,0 +1,21 @@
+#!/bin/sh -ev
+
+MIRROR="http://apache.osuosl.org"
+DIST="hadoop-${HADOOP2_VERSION}"
+TARBALL="${DIST}.tar.gz"
+TARBALL_URL="$MIRROR/hadoop/common/$DIST/$TARBALL"
+HADOOP_KEYS="https://dist.apache.org/repos/dist/release/hadoop/common/KEYS"
+TARBALL_SIG="${TARBALL}.asc"
+TARBALL_SIG_URL="https://dist.apache.org/repos/dist/release/hadoop/common/$DIST/$TARBALL_SIG"
+
+curl -L "$HADOOP_KEYS" > /tmp/KEYS
+gpg --import  /tmp/KEYS
+rm /tmp/KEYS
+
+mkdir -p "$HADOOP_INSTALL_DIR"
+cd "$HADOOP_INSTALL_DIR"
+curl -L "$TARBALL_URL" > "/tmp/$TARBALL"
+curl -L "$TARBALL_SIG_URL" > "/tmp/$TARBALL_SIG"
+gpg --verify "/tmp/$TARBALL_SIG"
+tar --strip-components 1 -zxf "/tmp/$TARBALL"
+rm -f "/tmp/$TARBALL" "/tmp/$TARBALL_SIG"
