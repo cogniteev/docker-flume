@@ -3,7 +3,7 @@
 git clone https://github.com/kite-sdk/kite.git /var/src/kite
 cd /var/src/kite
 git checkout "release-${KITE_VERSION}"
-mvn package -DskipTests
+mvn package -DjavaVersion=1.8 -DskipTests
 
 for target in kite-morphlines ; do
     mkdir -p "$KITE_INSTALL_DIR"
