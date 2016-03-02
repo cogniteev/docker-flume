@@ -1,5 +1,5 @@
 # Build Flume and apply some patches
-FROM cogniteev/oracle-java:java7
+FROM cogniteev/oracle-java:java8
 
 RUN apt-get update && apt-get install -y maven curl patch git
 
