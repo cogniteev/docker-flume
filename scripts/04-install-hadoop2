@@ -12,8 +12,8 @@ curl -L "$HADOOP_KEYS" > /tmp/KEYS
 gpg --import  /tmp/KEYS
 rm /tmp/KEYS
 
-mkdir -p "$HADOOP_INSTALL_DIR"
-cd "$HADOOP_INSTALL_DIR"
+mkdir -p "$HADOOP2_INSTALL_DIR"
+cd "$HADOOP2_INSTALL_DIR"
 curl -L "$TARBALL_URL" > "/tmp/$TARBALL"
 curl -L "$TARBALL_SIG_URL" > "/tmp/$TARBALL_SIG"
 gpg --verify "/tmp/$TARBALL_SIG"
