@@ -13,7 +13,7 @@ This repository contains **Dockerfile** of [Apache Flume](flume.apache.org) for 
 
 # Content
 
-* [Oracle Java JDK](http://www.oracle.com/technetwork/java/javase/downloads/index.html) 8 1.8.0_74
+* [Oracle Java JDK](http://www.oracle.com/technetwork/java/javase/downloads/index.html) 1.8.0_74
 * [Apache Flume](https://flume.apache.org/) 1.6.0
 * [Kite's API](http://kitesdk.org/) 2.2.0
 * Hadoop:
