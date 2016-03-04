@@ -17,16 +17,18 @@
 # If this file is placed at FLUME_CONF_DIR/flume-env.sh, it will be sourced
 # during Flume startup.
 
-# Enviroment variables can be set here.
+# Environment variables can be set here.
 
 # Give Flume more memory and pre-allocate, enable remote monitoring via JMX
 export JAVA_OPTS="-Xms100m -Xmx2000m -Dcom.sun.management.jmxremote"
 
 if [ "x$WITH_HADOOP1" != x ] ; then
     # Add hadoop jar to classpath
-    FLUME_CLASSPATH="$FLUME_CLASSPATH:$HADOOP_INSTALL_DIR/hadoop-core-1.2.1.jar"
+    HADOOP_HOME="$HADOOP_INSTALL_DIR"
+    FLUME_CLASSPATH="$HADOOP_INSTALL_DIR/hadoop-core-1.2.1.jar"
 elif [ "x$WITH_HADOOP2" != x ] ; then
-    for subdir in common hdfs; do
+    HADOOP_HOME="$HADOOP2_INSTALL_DIR"
+    for subdir in hdfs common; do
         FLUME_CLASSPATH="$FLUME_CLASSPATH:$HADOOP2_INSTALL_DIR/share/hadoop/$subdir/hadoop-${subdir}-${HADOOP2_VERSION}.jar"
     done
 fi
