@@ -43,7 +43,9 @@ for jar in \
 done
 
 # Custom jar added or build by child Docker image
-FLUME_CLASSPATH="$FLUME_CLASSPATH:/var/src/agent/extra-jars/*.jar"
+for jar in `find /var/src/agent/extra-jars -name '*.jar' -type f -maxdepth 1`; do
+    FLUME_CLASSPATH="$FLUME_CLASSPATH:$jar"
+done
 
 # Add tools.jar to classpath to compile inline java in Morphline config
 FLUME_CLASSPATH="$FLUME_CLASSPATH:$JAVA_HOME/lib/tools.jar"
