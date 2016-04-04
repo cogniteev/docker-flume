@@ -8,6 +8,7 @@ curl -L "$FLUME_MIRROR/flume/${FLUME_VERSION}/$FLUME_TARBALL" | \
     tar --strip-components 1 -zx
 
 for p in `echo /var/src/flume-patches/*` ; do
+	echo "Applying patch $p"
     patch -p0 < "$p"
 done
 

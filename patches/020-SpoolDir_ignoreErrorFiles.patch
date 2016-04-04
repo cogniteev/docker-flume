@@ -1,0 +1,170 @@
+diff --git flume-ng-core/src/main/java/org/apache/flume/client/avro/ReliableSpoolingFileEventReader.java flume-ng-core/src/main/java/org/apache/flume/client/avro/ReliableSpoolingFileEventReader.java
+index 9bb0bee..329d1d0 100644
+--- flume-ng-core/src/main/java/org/apache/flume/client/avro/ReliableSpoolingFileEventReader.java
++++ flume-ng-core/src/main/java/org/apache/flume/client/avro/ReliableSpoolingFileEventReader.java
+@@ -96,6 +96,7 @@ public class ReliableSpoolingFileEventReader implements ReliableEventReader {
+   private final DecodeErrorPolicy decodeErrorPolicy;
+   private final ConsumeOrder consumeOrder;
+   private final boolean recursiveDirectorySearch;
++  private final boolean ignoreErrorFiles;
+ 
+   private Optional<FileInfo> currentFile = Optional.absent();
+   /** Always contains the last file from which lines have been read. **/
+@@ -117,7 +118,8 @@ public class ReliableSpoolingFileEventReader implements ReliableEventReader {
+       String deletePolicy, String inputCharset,
+       DecodeErrorPolicy decodeErrorPolicy, 
+       ConsumeOrder consumeOrder,
+-      boolean recursiveDirectorySearch) throws IOException {
++      boolean recursiveDirectorySearch,
++      boolean ignoreErrorFiles) throws IOException {
+ 
+     // Sanity checks
+     Preconditions.checkNotNull(spoolDirectory);
+@@ -179,6 +181,7 @@ public class ReliableSpoolingFileEventReader implements ReliableEventReader {
+     this.decodeErrorPolicy = Preconditions.checkNotNull(decodeErrorPolicy);
+     this.consumeOrder = Preconditions.checkNotNull(consumeOrder);
+     this.recursiveDirectorySearch = recursiveDirectorySearch;
++    this.ignoreErrorFiles = ignoreErrorFiles;
+ 
+     File trackerDirectory = new File(trackerDirPath);
+ 
+@@ -233,7 +236,7 @@ public class ReliableSpoolingFileEventReader implements ReliableEventReader {
+       return true;
+     }
+   };
+-  
++
+   /**
+    * Recursively gather candidate files
+    * @param directory the directory to gather files from
+@@ -244,7 +247,7 @@ public class ReliableSpoolingFileEventReader implements ReliableEventReader {
+     if (directory==null || ! directory.isDirectory()){
+       return candidateFiles;
+     }
+-    
++
+     for(File file : directory.listFiles(filter)){
+       if (file.isDirectory()) {
+         candidateFiles.addAll(getCandidateFiles(file));
+@@ -301,20 +304,20 @@ public class ReliableSpoolingFileEventReader implements ReliableEventReader {
+       }
+     }
+ 
+-    EventDeserializer des = currentFile.get().getDeserializer();
+-    List<Event> events = des.readEvents(numEvents);
++    List<Event> events = _readEvents(currentFile.get(), numEvents);
+ 
+     /* It's possible that the last read took us just up to a file boundary.
+      * If so, try to roll to the next file, if there is one.
+      * Loop until events is not empty or there is no next file in case of 0 byte files */
+-    while (events.isEmpty()) {
++    while (events == null || events.isEmpty()) {
+       logger.info("Last read took us just up to a file boundary. Rolling to the next file, if there is one.");
+       retireCurrentFile();
+       currentFile = getNextFile();
+       if (!currentFile.isPresent()) {
+         return Collections.emptyList();
+       }
+-      events = currentFile.get().getDeserializer().readEvents(numEvents);
++
++      events = _readEvents(currentFile.get(), numEvents);
+     }
+ 
+     if (annotateFileName) {
+@@ -336,6 +339,20 @@ public class ReliableSpoolingFileEventReader implements ReliableEventReader {
+     return events;
+   }
+ 
++  private List<Event> _readEvents(FileInfo fileInfo, int numEvents) throws IOException {
++    try {
++      return fileInfo.getDeserializer().readEvents(numEvents);
++    } catch (IOException ex){
++      if (ignoreErrorFiles){
++        logger.warn("Error while reading file " + currentFile.get().toString() + ". Skipping...");
++        logger.warn(ex.toString());
++        return null;
++      } else {
++        throw ex;
++      }
++    }
++  }
++
+   @Override
+   public void close() throws IOException {
+     if (currentFile.isPresent()) {
+@@ -638,7 +655,9 @@ public class ReliableSpoolingFileEventReader implements ReliableEventReader {
+         SpoolDirectorySourceConfigurationConstants.DEFAULT_CONSUME_ORDER;
+     private boolean recursiveDirectorySearch =
+         SpoolDirectorySourceConfigurationConstants.DEFAULT_RECURSIVE_DIRECTORY_SEARCH;
+-    
++    private Boolean ignoreErrorFiles =
++        SpoolDirectorySourceConfigurationConstants.DEFAULT_IGNORE_ERROR_FILES;
++
+     public Builder spoolDirectory(File directory) {
+       this.spoolDirectory = directory;
+       return this;
+@@ -712,14 +731,19 @@ public class ReliableSpoolingFileEventReader implements ReliableEventReader {
+     public Builder consumeOrder(ConsumeOrder consumeOrder) {
+       this.consumeOrder = consumeOrder;
+       return this;
+-    }        
++    }
++
++    public Builder ignoreErrorFiles(Boolean ignoreErrorFiles) {
++      this.ignoreErrorFiles = ignoreErrorFiles;
++      return this;
++    }
+     
+     public ReliableSpoolingFileEventReader build() throws IOException {
+       return new ReliableSpoolingFileEventReader(spoolDirectory, completedSuffix,
+           ignorePattern, trackerDirPath, annotateFileName, fileNameHeader,
+           annotateBaseName, baseNameHeader, deserializerType,
+           deserializerContext, deletePolicy, inputCharset, decodeErrorPolicy,
+-          consumeOrder, recursiveDirectorySearch);
++          consumeOrder, recursiveDirectorySearch, ignoreErrorFiles);
+     }
+   }
+ 
+diff --git flume-ng-core/src/main/java/org/apache/flume/source/SpoolDirectorySource.java flume-ng-core/src/main/java/org/apache/flume/source/SpoolDirectorySource.java
+index a7701c5..f3cd8ad 100644
+--- flume-ng-core/src/main/java/org/apache/flume/source/SpoolDirectorySource.java
++++ flume-ng-core/src/main/java/org/apache/flume/source/SpoolDirectorySource.java
+@@ -63,6 +63,7 @@ Configurable, EventDrivenSource {
+   private String deletePolicy;
+   private String inputCharset;
+   private DecodeErrorPolicy decodeErrorPolicy;
++  private boolean ignoreErrorFiles;
+   private volatile boolean hasFatalError = false;
+ 
+   private SourceCounter sourceCounter;
+@@ -99,6 +100,7 @@ Configurable, EventDrivenSource {
+           .decodeErrorPolicy(decodeErrorPolicy)
+           .consumeOrder(consumeOrder)
+           .recursiveDirectorySearch(recursiveDirectorySearch)
++          .ignoreErrorFiles(ignoreErrorFiles)
+           .build();
+     } catch (IOException ioe) {
+       throw new FlumeException("Error instantiating spooling event parser",
+@@ -170,6 +172,9 @@ Configurable, EventDrivenSource {
+     consumeOrder = ConsumeOrder.valueOf(context.getString(CONSUME_ORDER, 
+         DEFAULT_CONSUME_ORDER.toString()).toUpperCase(Locale.ENGLISH));
+ 
++    ignoreErrorFiles = context.getBoolean(IGNORE_ERROR_FILES,
++            DEFAULT_IGNORE_ERROR_FILES);
++
+     recursiveDirectorySearch = context.getBoolean(RECURSIVE_DIRECTORY_SEARCH,
+         DEFAULT_RECURSIVE_DIRECTORY_SEARCH);
+ 
+diff --git flume-ng-core/src/main/java/org/apache/flume/source/SpoolDirectorySourceConfigurationConstants.java flume-ng-core/src/main/java/org/apache/flume/source/SpoolDirectorySourceConfigurationConstants.java
+index 7f8f85c..0ae38e5 100644
+--- flume-ng-core/src/main/java/org/apache/flume/source/SpoolDirectorySourceConfigurationConstants.java
++++ flume-ng-core/src/main/java/org/apache/flume/source/SpoolDirectorySourceConfigurationConstants.java
+@@ -99,4 +99,8 @@ public class SpoolDirectorySourceConfigurationConstants {
+   public static final String RECURSIVE_DIRECTORY_SEARCH = "recursiveDirectorySearch";
+   public static final boolean DEFAULT_RECURSIVE_DIRECTORY_SEARCH = false;
+ 
++  /** Whether to ignore files with errors or raise an exception */
++  public static final String IGNORE_ERROR_FILES = "ignoreErrorFiles";
++  public static final boolean DEFAULT_IGNORE_ERROR_FILES = false;
++
+ }
